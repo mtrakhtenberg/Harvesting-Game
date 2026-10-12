@@ -11,7 +11,13 @@ Your app description
 class C(BaseConstants):
     NAME_IN_URL = 'harvesting'
     PLAYERS_PER_GROUP = 9
-    NUM_ROUNDS = 5
+    NUM_ROUNDS = 20
+
+    #block one (practice) = rounds 1-5
+    #block two (real_ = rounds 6-20)
+        #round 1 = 6-10
+        #round 2 = 11-15
+        #round 3 = 16-20
 
 
 class Subsession(BaseSubsession):
@@ -35,6 +41,10 @@ class Group(BaseGroup):
 
 class Player(BasePlayer):
     #identification
+
+    block = models.IntegerField() #1 is practice, 2 is real
+    real_round = models.IntegerField() #0 for practice, 1-3 for real
+    stage = models.IntegerField() #1-5
     
     #payment
     final_pay = models.IntegerField(initial=0) #final pay
@@ -74,6 +84,17 @@ class Player(BasePlayer):
             label="do i want to put the answer here"
         )
 
+def set_labels(player: Player):
+    rn = player.round_number
+    if rn <= 5:
+        player.block = 1
+        player.real_round = 0
+        player.stage = rn
+    else:
+        player.block = 2
+        player.real_round = (rn-6) // 5 + 1
+        player.stage = (rn-6) % 5 + 1
+
 def set_payoffs(player: Player):
     #set payoffs for the round
     #earn 9 points for each acre harvested
@@ -84,30 +105,55 @@ def set_payoffs(player: Player):
     #payment stage = each point earned is worth 0.01 dollars, so multiply by 0.01 to get the final pay in dollars
     #if the final round, then set the payment round to the randomly selected round
     if player.subsession.round_number == C.NUM_ROUNDS:
-        player.payment_round = player.subsession.payround
-        player.final_pay = player.pay * 0.01
+        player.payment_round = player.subsession.vars['payround']
+        points = sum(
+            p.pay for p in player.in_all_rounds()
+            if p.block ==2 and p.real_round == player.payment_round
+        )
+        player.final_pay = points * 0.01
         player.trees = player.acres_remaining // 10
         #1 tree for every 10 acres remaining, can be partial trees
 
 
 # PAGES
 class Consent(Page):
-    # consent form
-    pass
+    @staticmethod
+    def is_displayed(player: Player):
+        return player.round_number == 1
 
 class attention_check(Page):
+    @staticmethod
+    def is_displayed(player: Player):
+        return player.round_number == 1
     form_model = 'player'
     form_fields = ['attention_check']
 
-class Introduction(Page):
-    #description of the game
-    pass
+class Intro(Page):
+    @staticmethod
+    def is_displayed(player: Player):
+        return player.round_number == 1
 
 class Instructions(Page):
-    #instructions for the game
-    pass
+    @staticmethod
+    def is_displayed(player: Player):
+        return player.round_number == 1
+
+class begin_practice(Page):
+    #begin practice round
+    @staticmethod
+    def is_displayed(player: Player):
+        return player.round_number == 1
+    #start of block one
+
+class begin_real(Page):
+    @staticmethod
+    def is_displayed(player: Player):
+        return player.round_number in [6,11,16]
+
 
 class Harvest(Page):
+    def before_next_page(player: Player, timeout_happened):
+        set_labels(player)
     form_model = 'player'
     form_fields = ['acres_harvested']
 
@@ -136,9 +182,11 @@ class display_round(Page):
 class Results(Page):
     pass
 
-class begin_practice(Page):
-    #begin practice round
-    pass
 
-
-page_sequence = [Consent, attention_check, Introduction, Instructions, StartWaitPage, comprehension_quiz, display_round, Results]
+#consent, attention check, intro, instructions, comprehension questions, practice rounds, 3 real stages, final results
+#within comprehension questions, one question per page (with instructions on each?) to allow 3 trys on both (unless prof goff says otherwise)
+#for practice rounds, begin practice page, then rounds 1-5, end practice stage page
+#for each stage, can code for the page to reflect which round, so begin, 5 rounds, end stage page
+#then demographics, end page, etc.
+#check how many wait pages are needed, for when what harvesting looks like needs to be updated
+page_sequence = [Consent, attention_check, Intro, Instructions, StartWaitPage, comprehension_quiz, display_round, Results]
