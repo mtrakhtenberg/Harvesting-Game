@@ -1,0 +1,75 @@
+{{ block title }}
+    Harvest decision
+{{ endblock }}
+{{ block content }}
+
+<h3>
+    Stage {{ player.real_round }}, Round {{ player.stage }}
+</h3>
+
+<p>
+    Choose how many acres you would like to harvest this round.
+</p>
+
+<div class="forest-grid">
+    {{ for forest in forest_views }}
+        <div class="forest-card{% if forest.is_self %} forest-card-self{% endif %}">
+            <div class="forest-label">
+                {% if forest.is_self %}
+                    You
+                {% else %}
+                    Participant {{ forest.number }}
+                {% endif %}
+            </div>
+            <img
+                src="{{ static forest.image }}"
+                alt="{% if forest.is_self %}Your{% else %}Participant {{ forest.number }}'s{% endif %} forest, {{ forest.acres }} acres remaining"
+            >
+            <div>{{ forest.acres }} acres left</div>
+        </div>
+    {{ endfor }}
+</div>
+
+<p>
+    You currently have <strong>{{ player.acres_remaining }}</strong>
+    acres remaining.
+</p>
+
+{{ formfield player.acres_harvested }}
+{{ next_button }}
+
+<style>
+    .forest-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+        margin: 1.5rem auto;
+        max-width: 900px;
+    }
+
+    .forest-card {
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        text-align: center;
+    }
+
+    .forest-card-self {
+        border: 3px solid #0d6efd;
+        background-color: #eaf3ff;
+    }
+
+    .forest-card img {
+        display: block;
+        height: 140px;
+        margin: 0.5rem auto;
+        max-width: 100%;
+        object-fit: contain;
+    }
+
+    .forest-label {
+        font-weight: bold;
+    }
+</style>
+
+{{ endblock }}

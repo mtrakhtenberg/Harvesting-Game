@@ -6,7 +6,7 @@ SESSION_CONFIGS = [
         name='harvesting',
         display_name="Harvesting Game",
         app_sequence=['harvesting'],
-        num_demo_participants=3, #make sure to change
+        num_demo_participants=9,
     )
     #dict(
      #   name='survey', app_sequence=['survey', 'payment_info'], num_demo_participants=1
