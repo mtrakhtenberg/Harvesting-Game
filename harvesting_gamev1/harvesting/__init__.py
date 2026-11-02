@@ -18,6 +18,13 @@ class C(BaseConstants):
         #round 1 = 6-10
         #round 2 = 11-15
         #round 3 = 16-20
+    
+    START_ACRES = 40 #number of starting acres per player
+    POINTS_PER_ACRE = 9 #number of points earned per acre harvested
+    DOLLARS_PER_POINT = 0.01 #number of dollars earned per point
+    ACRES_PER_TREE = 10 #number of acres remaining for each tree at the end of the game
+
+    QUIZ_ANSWERS = dict(Q1='5', Q2='2.8') #correct answers for the comprehension quiz
 
 
 class Subsession(BaseSubsession):
@@ -25,51 +32,39 @@ class Subsession(BaseSubsession):
     payround = models.IntegerField() #randomly selected round used for payment
 
 def creating_session(subsession: Subsession):
-   random.seed()
-   #counters used this round
-   subsession.payround = 0 #initialize it to zero, changes in stage 3 when payround is randomly selected
-
-   for player in subsession.get_players():
-       if subsession.round_number in [1, 6, 11, 16]:
-           player.acres_remaining = 40
-       else:
-           player.acres_remaining = player.in_round(
-               subsession.round_number - 1
-           ).acres_remaining
-
    #set payment round
-   if subsession.round_number == C.NUM_ROUNDS: #choose payment round after the third stage
-       subsession.payround = random.randint(2, C.NUM_ROUNDS)
-
+    if subsession.round_number == 1: #choose random payment round
+       subsession.session.vars['payround'] = random.randint(1, 3) #randomly select a round from the three real rounds for payment
+    for p in subsession.get_players():
+       set_labels(p)
 class Group(BaseGroup):
     pass
 
 
 class Player(BasePlayer):
     #identification
-
     block = models.IntegerField() #1 is practice, 2 is real
     real_round = models.IntegerField() #0 for practice, 1-3 for real
     stage = models.IntegerField() #1-5
 
-    acres_remaining = models.IntegerField(initial=40) #running count of acres remaining per player
-    acres_harvested = models.IntegerField(min=0, max=40) #acres harvested this round
+    acres_remaining = models.IntegerField() #running count of acres remaining per player at the end of the round
+    acres_harvested = models.IntegerField(min=0) #acres harvested this round
     trees = models.FloatField(initial=0) #number of trees remaining at the end of the game
 
     
     #payment
-    final_pay = models.IntegerField(initial=0) #final pay
+    final_pay = models.FloatField(initial=0) #final pay
     payment_round = models.IntegerField(initial=0) #randomly selected round used for payment
     pay = models.IntegerField(initial=0) #pay for the round
 
     #attention check
     attention_check = models.StringField(
         choices=[
-            ['strongly disagree', 'Strongly disagree'],
-            ['somewhat disagree', 'Somewhat disagree'],
+            ['Strongly disagree', 'Strongly disagree'],
+            ['Somewhat disagree', 'Somewhat disagree'],
             ['Neither agree nor disagree', 'Neither agree nor disagree'],
-            ['somewhat agree', 'Somewhat agree'],
-            ['strongly agree', 'Strongly agree'],
+            ['Somewhat agree', 'Somewhat agree'],
+            ['Strongly agree', 'Strongly agree'],
         ],
         label=" "
     )
@@ -83,6 +78,7 @@ class Player(BasePlayer):
             ['5', '5'],
         ],
         label="do i want to put the answer here"
+        widget=widgets.RadioSelect
     )
 
     Q2 = models.StringField(
@@ -93,7 +89,11 @@ class Player(BasePlayer):
                 ['2.8', '2.8'],
             ],
             label="do i want to put the answer here"
+            widget=widgets.RadioSelect
         )
+
+def acres_harvest_max(player: Player):
+    return player.acres_available(player)
 
 def set_labels(player: Player):
     rn = player.round_number
@@ -106,26 +106,31 @@ def set_labels(player: Player):
         player.real_round = (rn-6) // 5 + 1
         player.stage = (rn-6) % 5 + 1
 
+def get_acres_available(player: Player):
+    if player.stage == 1:
+        return C.START_ACRES
+    return player.in_round(player.round_number - 1).acres_remaining
+
 def set_payoffs(player: Player):
-    #set payoffs for the round
+    available = get_acres_available(player)
+
     #earn 9 points for each acre harvested
-    player.pay = player.acres_harvested * 9
-    player.acres_remaining -= player.acres_harvested
-    #1 acre of forested land will regrow for every 4 acres of forested land remaining in rounds 1-4
-    if player.subsession.round_number in [1, 2, 3, 4]:
-        player.acres_remaining += player.acres_remaining // 4
-        player.acres_remaining = min(player.acres_remaining, 40)
-    #payment stage = each point earned is worth 0.01 dollars, so multiply by 0.01 to get the final pay in dollars
-    #if the final round, then set the payment round to the randomly selected round
-    if player.subsession.round_number == C.NUM_ROUNDS:
-        player.payment_round = player.subsession.vars['payround']
+    player.pay = player.acres_harvested * C.POINTS_PER_ACRE
+    remaining = available - player.acres_harvested
+
+    if player.stage in [1,2,3,4]:
+        remaining = min(C.START_ACRES, remaining + (remaining // 4)) #1 acre of forested land will regrow for every 4 acres of forested land remaining in rounds 1-4
+    
+    player.acres_remaining = remaining
+
+    if player.round_number == C.NUM_ROUNDS:
+        player.payment_round = player.session.vars['payround']
         points = sum(
             p.pay for p in player.in_all_rounds()
-            if p.block ==2 and p.real_round == player.payment_round
+            if p.block == 2 and p.real_round == player.payment_round
         )
-        player.final_pay = points * 0.01
-        player.trees = player.acres_remaining // 10
-        #1 tree for every 10 acres remaining, can be partial trees
+        player.final_pay = round(points * C.DOLLARS_PER_POINT, 2)
+        player.trees = player.acres_remaining / C.ACRES_PER_TREE
 
 
 # PAGES
@@ -165,49 +170,11 @@ class begin_real(Page):
 
 
 class Harvest(Page):
-    @staticmethod
-    def vars_for_template(player: Player):
-        participants = {
-            participant.id_in_group: participant
-            for participant in player.group.get_players()
-        }
-        ordered_ids = [
-            participant_id
-            for participant_id in participants
-            if participant_id != player.id_in_group
-        ]
-        ordered_ids.insert(4, player.id_in_group)
-
-        return dict(
-            forest_views=[
-                dict(
-                    number=participant_id,
-                    is_self=participant_id == player.id_in_group,
-                    acres=participants[participant_id].acres_remaining,
-                    image=(
-                        f'harvesting/forest_'
-                        f'{participants[participant_id].acres_remaining}.png'
-                    ),
-                )
-                for participant_id in ordered_ids
-            ]
-        )
-
     def before_next_page(player: Player, timeout_happened):
         set_labels(player)
         set_payoffs(player)
-
     form_model = 'player'
     form_fields = ['acres_harvested']
-
-    @staticmethod
-    def error_message(player: Player, values):
-        harvested = values['acres_harvested']
-        if harvested > player.acres_remaining:
-            return (
-                'You cannot harvest more acres than you currently have '
-                f'({player.acres_remaining}).'
-            )
 
 class RoundResults(Page):
     #display the results of the round
@@ -259,13 +226,4 @@ class GroupStatus(Page):
 #for each stage, can code for the page to reflect which round, so begin, 5 rounds, end stage page
 #then demographics, end page, etc.
 #check how many wait pages are needed, for when what harvesting looks like needs to be updated
-page_sequence = [
-    Consent,
-    attention_check,
-    Intro,
-    Instructions,
-    StartWaitPage,
-    comprehension_quiz,
-    Harvest,
-    Results,
-]
+page_sequence = [Consent, attention_check, Intro, Instructions, StartWaitPage, comprehension_quiz, display_round, Results]
